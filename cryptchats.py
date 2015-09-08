@@ -215,7 +215,7 @@ class Chats(object):
 
         ct, tag = self.encrypt_aes(self.send['message_key'],
             self.send['message_counter'], pt)
-        
+
         blocks = self.mac_blocks(tag + ct, self.send['chaff_key'])
         return self.chaff(blocks)
 
@@ -265,6 +265,8 @@ class Chats(object):
             return None, None, None
 
     def decrypt_msg(self, ct):
+        # self.print_key('Received message.', self.receive)
+
         ct, exchange_ct, key = self.try_dechaffing(ct)
         if not ct and not exchange_ct:
             return None, None
@@ -308,8 +310,8 @@ if __name__ == "__main__":
     alice_key = curve25519.Private()
     bob_key = curve25519.Private()
 
-    alice = Chats(alice_key, bob_key.get_public(), debug=True)
-    bob = Chats(bob_key, alice_key.get_public(), debug=True)
+    alice = Chats(alice_key, bob_key.get_public(), 400, debug=True)
+    bob = Chats(bob_key, alice_key.get_public(), 400, debug=True)
 
     alice_receive, alice_send = alice.init_keys()
     bob_receive, bob_send = bob.init_keys()
@@ -323,8 +325,12 @@ if __name__ == "__main__":
     print '\nAlice -> Bob initial: '
     ct = alice.encrypt_msg('ayy lmaoayy lmao')
     pt, pk = bob.decrypt_msg(ct)
+    print 'ciphertext:   ' + ct.encode('base64').replace('\n', '')
+    print 'key exchange: ' + pk.encode('base64').replace('\n', '')
     if pk: alice.decrypt_msg(pk)
     print 'Plaintext: %s' % pt
+
+    quit()
 
     print '\nAlice -> Bob, Bob decrypts but forgets to respond to the key exchange: '
     ct = alice.encrypt_msg('ayy lmaoayy lmao')
