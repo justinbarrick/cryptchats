@@ -5,32 +5,90 @@ SCRIPT_DESC = "chats"
 
 import re
 import weechat
-from cryptchats import Chats
+from cryptchats import Chats, ChatsError
 import curve25519
-
-keys = {
-    'bob': {
-        'lt': 'b8950391623c96c9aac0198e83e437ee0fc82cf895edce6fd552fc7bb09e7761',
-        'ephem0': '6858bea4b5f4a9985fd9df833f622df82e3f837467b92c769809c530104ef879',
-        'ephem1': '10bddc067088687bbf2afdfe823d6dd2ce2b4c3724b73fb36579a22177bf157d'
-    },
-    'alice': {
-        'lt': '707a33db6b6b59905c8aa89b6ef3b527f2f8e9c85be9bb6824c0fd71c7e49f67',
-        'ephem0': 'b880637c8c3996be49287e31ab2d43934cad3cfac819ae7dcd7c7c0d5a261a79',
-        'ephem1': '580006b1e24f9084b777927048297031cbc571956274c1cfc3e6d5539a72a378'
-    }
-}
+import base64
+import json
 
 chats = {}
+keys = {}
+key_path = ''
 
-def get_key(key):
-    return curve25519.Private(key.decode('hex'))
+def save_keys():
+    tmp_keys = {}
+
+    for key in keys:
+        tmp_keys[key] = b64encode(keys[key].serialize())
+
+    json.dump(tmp_keys, open(key_path, 'w'))
+
+def load_keys():
+    try:
+        tmp_keys = json.load(open(key_path))
+    except:
+        keys['my_key'] = curve25519.Private()
+        save_keys()
+        return
+
+    for key in tmp_keys:
+        if key == 'my_key':
+            keys[key] = curve25519.Private(b64decode(tmp_keys[key]))
+        else:
+            keys[key] = curve25519.Public(b64decode(tmp_keys[key]))
+
+def b64decode(_str):
+    return base64.b64decode(_str)
 
 def b64encode(_str):
-    return _str.encode('base64').replace('\n', '')
+    return base64.b64encode(_str).replace('\n', '')
 
 def chats_unload_cb():
-    return
+    return weechat.WEECHAT_RC_OK
+
+def create_window(server_name, nick):
+    buff = weechat.info_get('irc_buffer', '%s,%s' % (server_name, nick))
+    if weechat.buffer_get_string(buff, "localvar_type") != "private":
+        weechat.command(buff, '/mute -all query ' + nick)
+
+def silent_send(server_name, nick, msg):
+    print server_name, nick
+    buff = weechat.info_get('irc_buffer', '%s,%s' % (server_name, nick))
+    weechat.command(buff, '/mute -all say ' + b64encode(msg))
+
+def chats_setkey_cb(data, buffer, args):
+    args = args.split(' ')
+
+    try:
+        keys[args[0]] = curve25519.Public(b64decode(args[1]))
+        save_keys()
+    except:
+        print 'Invalid key: /setkey <nick> <key>.'
+
+    return weechat.WEECHAT_RC_OK
+
+def chats_listkeys_cb(data, buffer, args):
+    print 'Your key: ' + b64encode(keys['my_key'].get_public().serialize())
+
+    for key in keys:
+        if key == 'my_key':
+            continue
+
+        print '%s: %s' % (key, b64encode(keys[key].serialize()))
+
+    return weechat.WEECHAT_RC_OK
+
+def chats_keyx_cb(data, buff, args):
+    nick = args
+    create_window('', nick)
+
+    if nick not in chats:
+        return weechat.WEECHAT_RC_OK
+
+    chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
+        chaff_block_size=8, debug=True)
+
+    silent_send('', nick, chats[nick].encrypt_initial_keyx())
+    return weechat.WEECHAT_RC_OK
 
 def chats_modifier_in_privmsg_cb(data, modifier, server_name, string):
     my_nick = weechat.info_get('irc_nick', server_name)
@@ -42,24 +100,32 @@ def chats_modifier_in_privmsg_cb(data, modifier, server_name, string):
     nick = omsg.group(1)
     msg = omsg.group(4)
 
+    create_window(server_name, nick)
+
     if nick in keys and nick not in chats:
-        chats[nick] = Chats(get_key(keys[my_nick]['lt']),
-            get_key(keys[nick]['lt']).get_public(), max_length=400, debug=True)
-        chats[nick].init_keys(get_key(keys[my_nick]['ephem1']),
-            get_key(keys[my_nick]['ephem0']))
-        chats[nick].send_key(get_key(keys[nick]['ephem1']).get_public().serialize())
-        chats[nick].receive_key(get_key(keys[nick]['ephem0']).get_public().serialize())
+        chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
+            chaff_block_size=8, debug=True)
     elif nick not in keys:
         return string
 
-    msg, keyx = chats[nick].decrypt_msg(msg.decode('base64'))
-    if keyx:
-        buff = weechat.info_get('irc_buffer', '%s,%s' % (server_name, nick))
-        weechat.command(buff, '/mute -all say ' + b64encode(keyx))
-
-    if msg:
+    try:
+        msg = chats[nick].decrypt_msg(b64decode(msg))
+    except ChatsError:
         return ':%s!%s@%s PRIVMSG %s :%s' % (nick, omsg.group(2), omsg.group(3),
-            my_nick, msg)
+            my_nick, '\x0305' + omsg.group(4))
+
+    if not msg:
+        return ''
+
+    if 'keyx' in msg:
+        if msg['keyx'] == True:
+            print 'Key exchange with %s completed.' % nick
+        else:
+            silent_send(server_name, nick, msg['keyx'])
+
+    if 'msg' in msg:
+        return ':%s!%s@%s PRIVMSG %s :%s' % (nick, omsg.group(2), omsg.group(3),
+            my_nick, '\x0303' + msg['msg'])
     else:
         return ''
 
@@ -68,22 +134,21 @@ def chats_modifier_out_privmsg_cb(data, modifier, server_name, string):
     if not msg:
         return string
 
+    print '...'
+
     nick = msg.group(1)
     msg = msg.group(2)
 
-    if len(msg) == 384 and nick in chats:
+    if nick in keys and len(msg) == 384:
         return string
 
     my_nick = weechat.info_get('irc_nick', server_name)
     if nick in keys and nick not in chats:
-        chats[nick] = Chats(get_key(keys[my_nick]['lt']),
-            get_key(keys[nick]['lt']).get_public(), max_length=400, debug=True)
+        chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
+            chaff_block_size=8, debug=True)
 
-        chats[nick].init_keys(get_key(keys[my_nick]['ephem0']),
-            get_key(keys[my_nick]['ephem1']))
+        return 'PRIVMSG %s :%s' % (nick, b64encode(chats[nick].encrypt_initial_keyx()))
 
-        chats[nick].send_key(get_key(keys[nick]['ephem0']).get_public().serialize())
-        chats[nick].receive_key(get_key(keys[nick]['ephem1']).get_public().serialize())
     elif nick not in keys:
         return string
 
@@ -91,6 +156,26 @@ def chats_modifier_out_privmsg_cb(data, modifier, server_name, string):
 
 if __name__ == "__main__" and weechat.register(SCRIPT_NAME, '', '', '', SCRIPT_DESC,
   "chats_unload_cb", ''):
+    key_path = weechat.info_get('weechat_dir', '') + '/keys.json'
+    load_keys()
+
+    weechat.hook_command('setkey', 'set a key',
+        '<nick> <key>',
+        'jaja',
+        ' || %(nick) %(key)', 
+        'chats_setkey_cb', '')
+
+    weechat.hook_command('listkeys', 'list keys',
+        '',
+        'jaja',
+        ' || ', 
+        'chats_listkeys_cb', '')
+
+    weechat.hook_command('keyx', 'do a key exchange',
+        '<nick>',
+        'jaja',
+        ' || %(nick)',
+        'chats_keyx_cb', '')
 
     weechat.hook_modifier("irc_in_privmsg", "chats_modifier_in_privmsg_cb", "")
     weechat.hook_modifier("irc_out_privmsg", "chats_modifier_out_privmsg_cb", "")
