@@ -104,6 +104,8 @@ def privmsg_in(server, msg, nick, user):
         window = server.window_item_find(nick)
         printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg', [ nick, '\x0305' + omsg ])
         msg = None
+    except TypeError:
+        return 0
 
     if msg and 'keyx' in msg:
         if msg['keyx'] == True:
