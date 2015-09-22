@@ -46,6 +46,7 @@ class Chats(object):
         self.receive = { 'alice': curve25519.Private(), 'receiver': True }
 
     def hmac_counter(self, key):
+        # increment counter
         if 'counter' in key:
             key['counter'] += 1
         else:
@@ -196,13 +197,16 @@ class Chats(object):
         return key.get_public().serialize()
 
     def derive_keys(self, key=None):
+        # initial key exchanges.
         if not key or 'bob' not in key:
             master = self.long_term.get_shared_key(self.bob_long_term, self.derive_key)
             key = key or {}
+        # we're sending
         elif 'receiver' not in key:
             master  = self.long_term.get_shared_key(key['bob'], self.derive_key)
             master += key['alice'].get_shared_key(self.bob_long_term, self.derive_key)
             master += key['alice'].get_shared_key(key['bob'], self.derive_key)
+        # we are receiving
         else:
             if 'alice' not in key:
                 key['alice'] = curve25519.Private()
@@ -211,6 +215,7 @@ class Chats(object):
             master += self.long_term.get_shared_key(key['bob'], self.derive_key)
             master += key['alice'].get_shared_key(key['bob'], self.derive_key)
 
+        # derive keys
         key, hmac_key = self.hmac_counter(key)
         master = self.derive_key(self.hmac(hmac_key, master, algorithm=SHA512), 192)
         
@@ -221,7 +226,6 @@ class Chats(object):
         key['chaff_key'] = keys.pop()
         key['exchange_key'] = keys.pop()
         key['message_key'] = keys.pop()
-
         return key
 
     def receive_key(self, bob_ephemeral):

@@ -14,6 +14,7 @@ chats = {}
 keys = {}
 key_path = __file__.replace('scripts/autorun/%s.py' % __name__, 'keys.json')
 key_path = key_path.replace('scripts/%s.py' % __name__, 'keys.json')
+debug = False
 
 def save_keys():
     tmp_keys = {}
@@ -83,7 +84,7 @@ def keyx(data, server, witem):
         return
 
     chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
-        chaff_block_size=8, debug=False)
+        chaff_block_size=8, debug=debug)
 
     silent_send(server, nick, chats[nick].encrypt_initial_keyx())
     return 
@@ -93,7 +94,7 @@ def privmsg_in(server, msg, nick, user):
 
     if nick in keys and nick not in chats:
         chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
-            chaff_block_size=8, debug=False)
+            chaff_block_size=8, debug=debug)
     elif nick not in keys:
         return 0
 
@@ -112,15 +113,33 @@ def privmsg_in(server, msg, nick, user):
 
     if msg and 'msg' in msg:
         window = server.window_item_find(nick)
-        printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg',
-            [ nick, '\x0303' + msg['msg'] ])
+
+        msg['msg'] = msg['msg'].replace('\0', '')
+
+        action = re.search('^\x01ACTION (.*)\x01$', msg['msg'])
+        if action:
+            form, msg = 'action_public', action.group(1)
+        else:
+            form, msg = 'pubmsg', msg['msg']
+
+        printformat(window, irssi.MSGLEVEL_MSGS, form, [ nick, '\x0303' + msg ])
 
     irssi.signal_stop()
     return 1
 
-def privmsg_out(msg, server, query):
+def privmsg_out(msg, server, query, command=False):
+    if not query:
+        return 0
+
     nick = query.name
     my_nick = server.nick
+
+    if command:
+        msg = msg.split()
+        command, msg = msg[0], ''.join(msg[1:])
+
+        if command != '/me':
+            return 0
 
     if nick in keys and len(msg) == 384:
         return 0
@@ -130,25 +149,41 @@ def privmsg_out(msg, server, query):
 
     if nick in keys and nick not in chats:
         chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
-            chaff_block_size=8, debug=False)
+            chaff_block_size=8, debug=debug)
 
         silent_send(server, nick, chats[nick].encrypt_initial_keyx())
-
     elif nick not in keys:
         return 0
 
-    silent_send(server, nick, chats[nick].encrypt_msg(msg))
-    printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, 'own_msg',
-        [ my_nick, '\x0302' + msg ])
+    if command:
+        pt = '\x01ACTION ' + msg + '\x01'
+    else:
+        pt = msg
+
+    silent_send(server, nick, chats[nick].encrypt_msg(pt))
+
+    if command:
+        form = 'own_action'
+    else:
+        form = 'own_msg'
+
+    printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [ 
+        my_nick, '\x0302' + msg
+    ])
 
     irssi.signal_stop()
     return 1
+
+def command_out(command, server, query):
+    return privmsg_out(command, server, query, True)
 
 load_keys()
 
 irssi.get_script().theme_register([
     ('own_msg',  irssi.current_theme().get_format('fe-common/core', 'own_msg')),
-    ('pubmsg',  irssi.current_theme().get_format('fe-common/core', 'pubmsg'))
+    ('own_action',  irssi.current_theme().get_format('fe-common/irc', 'own_action')),
+    ('pubmsg',  irssi.current_theme().get_format('fe-common/core', 'pubmsg')),
+    ('action_public',  irssi.current_theme().get_format('fe-common/irc', 'action_public'))
 ])
 
 irssi.command_bind('setkey', setkey)
@@ -156,4 +191,6 @@ irssi.command_bind('listkeys', listkeys)
 irssi.command_bind('keyx', keyx)
 
 irssi.signal_add('message private', privmsg_in)
+irssi.signal_add('message irc action', privmsg_in)
 irssi.signal_add('send text', privmsg_out)
+irssi.signal_add('send command', command_out)
