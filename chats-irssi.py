@@ -76,7 +76,7 @@ def listkeys(data, server, witem):
 def keyx(data, server, witem):
     nick = data
 
-    if nick not in chats:
+    if nick not in keys:
         return 
 
     if not nick:
