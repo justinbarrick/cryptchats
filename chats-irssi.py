@@ -101,8 +101,9 @@ def privmsg_in(server, msg, nick, user):
     try:
         msg = chats[nick].decrypt_msg(b64decode(msg))
     except ChatsError:
-        window = server.window_item_find(nick)
-        printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg', [ nick, '\x0305' + omsg ])
+        if len(msg) != 384:
+            window = server.window_item_find(nick)
+            printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg', [ nick, '\x0305' + omsg ])
         msg = None
     except TypeError:
         return 0
