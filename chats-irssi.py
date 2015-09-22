@@ -136,6 +136,9 @@ def privmsg_out(msg, server, query, command=False):
 
     if command:
         msg = msg.split()
+        if len(msg) < 2:
+            return 0
+
         command, msg = msg[0], ''.join(msg[1:])
 
         if command != '/me':
