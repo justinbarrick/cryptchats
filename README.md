@@ -100,12 +100,17 @@ encrypts her ephemeral keys with the `message_key` and sends these to Bob:
     random_counter = random(16)
     message = alice_ephemeral_receiving | alice_ephemeral_sending
     ct, tag = AES(message, message_key, random_counter)
-    ct = counter | tag | ct
+    ct = random_counter | tag | ct
 
 For chaffing, Alice will use the generated `chaff_key`. Bob does the same thing
-when responding, except the message is reversed:
+when responding, except the message is reversed and instead of using the `message_key`
+and `chaff_key`, he uses the `exchange_key` and `exchange_chaff_key`. This allows
+the client to distinguish between fresh key exchanges and acknowledgements.
 
+    random_counter = random(16)
     message = bob_ephemeral_sending | bob_ephemeral_receiving
+    ct, tag = AES(message, exchange_key, random_counter)
+    ct = random_counter | tag | ct
 
 ### Encrypting messages
 

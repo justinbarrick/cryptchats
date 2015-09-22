@@ -116,15 +116,20 @@ class Chats(object):
         cipher.finalize()
         return data, cipher.tag
 
-    def decrypt_aes_initial_keyx(self, ct):
+    def decrypt_aes_initial_keyx(self, ct, ack=False):
         counter = ct[:self.cipher_block_size]
         tag = ct[self.cipher_block_size:self.cipher_block_size*2]
         ct = ct[self.cipher_block_size*2:]
         key = self.derive_keys()
 
         self.print_key('Decrypting initial key exchange.', key)
+        
+        if ack:
+            msg_key = key['exchange_key']
+        else:
+            msg_key = key['message_key']
 
-        cipher = Cipher(AES(key['message_key']), GCM(counter, tag),
+        cipher = Cipher(AES(msg_key), GCM(counter, tag),
             backend=bend).decryptor()
 
         try:
@@ -290,13 +295,17 @@ class Chats(object):
         if self.i_am_alice:
             ephem_keys  = self.get_public(self.receive['alice'])
             ephem_keys += self.get_public(self.send['alice'])
+            msg_key = key['message_key']
+            chaff_key = key['chaff_key']
         else:
             ephem_keys  = self.get_public(self.send['alice'])
             ephem_keys += self.get_public(self.receive['alice'])
+            msg_key = key['exchange_key']
+            chaff_key = key['exchange_chaff_key']
 
-        ct, tag = self.encrypt_aes(key['message_key'], counter, ephem_keys)
+        ct, tag = self.encrypt_aes(msg_key, counter, ephem_keys)
 
-        blocks = self.mac_blocks(counter + tag + ct, key['chaff_key'])
+        blocks = self.mac_blocks(counter + tag + ct, chaff_key)
         return self.chaff(blocks)
 
     def try_dechaffing(self, ct):
@@ -346,19 +355,28 @@ class Chats(object):
             raise ChatsError('not encrypted.')
 
         if 'bob' not in key:
-            bob_ephem1, bob_ephem2 = self.decrypt_aes_initial_keyx(ct)
+            ack = False
+            if exchange_ct:
+                ct = exchange_ct
+                ack = True
+
+            bob_ephem1, bob_ephem2 = self.decrypt_aes_initial_keyx(ct, ack=ack)
             if not bob_ephem1:
+                print ':('
                 return None
 
-            if self.i_am_alice:
+            if self.i_am_alice and ack:
                 self.receive_key(bob_ephem1)
                 self.send_key(bob_ephem2)
                 return { 'keyx': True }
-            else:
+            elif not ack:
                 self.init_keys()
                 self.send_key(bob_ephem1)
                 self.receive_key(bob_ephem2)
                 return { 'keyx': self.encrypt_initial_keyx() }
+            else:
+                print ';o'
+                return None
         elif ct:
             self.receive = key
             self.print_key('Decrypting message.', self.receive)
