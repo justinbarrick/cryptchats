@@ -155,6 +155,8 @@ def privmsg_out(msg, server, query, command=False):
             chaff_block_size=8, debug=debug)
 
         silent_send(server, nick, chats[nick].encrypt_initial_keyx())
+        irssi.signal_stop()
+        return 1
     elif nick not in keys:
         return 0
 

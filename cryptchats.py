@@ -321,7 +321,7 @@ class Chats(object):
             
             original_counter = key['counter']
 
-            while not exchange_blocks and not blocks and key['counter'] < 5:
+            while not exchange_blocks and not blocks and key['counter'] < 20:
                 key = self.derive_keys(key)
                 self.print_key('Testing.', key)
 
