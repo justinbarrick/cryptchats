@@ -3,7 +3,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher
 from cryptography.hazmat.primitives.ciphers.modes import GCM
 from cryptography.hazmat.primitives.ciphers.algorithms import AES
 from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
-from cryptography.hazmat.primitives.hashes import SHA256, SHA512
+from cryptography.hazmat.primitives.hashes import SHA256, SHA512, Hash
 from cryptography.hazmat.primitives.hmac import HMAC
 from cryptography.hazmat.backends import default_backend
 from cryptography.exceptions import InvalidTag
@@ -22,6 +22,8 @@ class Chats(object):
     def __init__(self, long_term, bob_long_term, max_length=480, chaff_block_size=16,
       debug=False):
         self.debug = debug
+
+        self.proto_id = 'cryptchats-protocol-v1'
 
         self.long_term = long_term
         self.long_term_public = self.long_term.get_public()
@@ -45,18 +47,9 @@ class Chats(object):
         self.send = { 'alice': curve25519.Private() }
         self.receive = { 'alice': curve25519.Private(), 'receiver': True }
 
-    def hmac_counter(self, key):
-        # increment counter
-        if 'counter' in key:
-            key['counter'] += 1
-        else:
-            key['counter'] = 0
-
-        return key, self.derive_key(struct.pack('>I', key['counter']))
-
     def derive_key(self, key, length=96):
-        hkdf = HKDFExpand(algorithm=SHA256(), length=length,
-            info='cryptchats-protocol-v1', backend=bend)
+        hkdf = HKDFExpand(algorithm=SHA512(), length=length,
+            info=self.proto_id, backend=bend)
         return hkdf.derive(key)
 
     def hmac(self, key, msg, truncate=None, algorithm=SHA256):
@@ -67,6 +60,11 @@ class Chats(object):
             return hmac.finalize()[:truncate]
         else:
             return hmac.finalize()
+
+    def sha512(self, msg):
+        sha512 = Hash(SHA512(), backend=bend)
+        sha512.update(msg)
+        return sha512.finalize()
 
     def chaff(self, blocks):
         length = self.max_length / self.chaff_block_size
@@ -217,8 +215,15 @@ class Chats(object):
             master += key['alice'].get_shared_key(key['bob'], self.derive_key)
 
         # derive keys
-        key, hmac_key = self.hmac_counter(key)
-        master = self.derive_key(self.hmac(hmac_key, master, algorithm=SHA512), 192)
+        # increment counter
+        if 'counter' in key:
+            key['counter'] += 1
+        else:
+            key['counter'] = 0
+
+        hmac_key = self.proto_id + ':mac'
+        master = self.hmac(master + str(key['counter']), hmac_key, algorithm=SHA512)
+        master = self.derive_key(master, 192)
         
         keys = list(struct.unpack('>32s32s32s32s32s32s', master))
         key['exchange_counter'] = keys.pop()

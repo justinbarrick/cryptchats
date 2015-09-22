@@ -34,8 +34,8 @@ Currently in beta, please report any bugs.
 
 * aes256, gcm mode
 * curve25519
-* hmac-sha256
-* hkdf with protocol id 'cryptchats-protocol-v1'
+* hmac-sha512 (hmac-sha256 for chaffing)
+* hkdf with proto_id 'cryptchats-protocol-v1'
 
 Each user has a long term ed25519 key that is generated when the script
 is first loaded. The public key should be shared over a secure channel
@@ -74,13 +74,13 @@ ephemeral key's shared key:
 
 ### Deriving keys
 
-Once the key seed is generated, an HMAC key is derived from the 96-byte HKDF of the message
-counter (a tally of all messages encrypted with this key, starting with zero) which is then
-used to HMAC the key seed. This value is then passed through the HKDF to generate the
-192-byte master key.
+Once the key seed is generated, an the key seed is concatenated with the message counter (a
+tally of all messages encrypted with this key, starting with zero) as literal string digits
+(e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'.This value is
+then passed through the HKDF to generate the 192-byte master key.
 
-    hmac_key = HKDF(counter, 96)
-    master = HKDF(HMAC(key_seed, hmac_key), 192)
+    hmac_key = proto_id | ':mac'
+    master = HKDF(HMAC(key_seed | str(counter), hmac_key), 192)
 
 From this master key we derive a series of 256-bit keys:
 
