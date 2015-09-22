@@ -194,6 +194,5 @@ irssi.command_bind('listkeys', listkeys)
 irssi.command_bind('keyx', keyx)
 
 irssi.signal_add('message private', privmsg_in)
-irssi.signal_add('message irc action', privmsg_in)
 irssi.signal_add('send text', privmsg_out)
 irssi.signal_add('send command', command_out)
