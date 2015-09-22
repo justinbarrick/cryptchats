@@ -55,7 +55,8 @@ class Chats(object):
         return key, self.derive_key(struct.pack('>I', key['counter']))
 
     def derive_key(self, key, length=96):
-        hkdf = HKDFExpand(algorithm=SHA256(), length=length, info='chats', backend=bend)
+        hkdf = HKDFExpand(algorithm=SHA256(), length=length,
+            info='cryptchats-protocol-v1', backend=bend)
         return hkdf.derive(key)
 
     def hmac(self, key, msg, truncate=None, algorithm=SHA256):

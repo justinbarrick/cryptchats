@@ -1,4 +1,16 @@
-<p>Dependencies:</p>
+<h1>Cryptchats</h1>
+
+<p>Cryptchats is a plugin for irssi implementing strong cryptography for private
+messages. It is still a work in progress and likely has some security issues. As usual,
+it should not be considered secure.</p>
+
+<p>This protocol is based off of the
+<a href="https://gitweb.torproject.org/torspec.git/tree/proposals/216-ntor-handshake.txt">ntor handshake</a>,
+<a href="https://github.com/trevp/axolotl/wiki">axolotl protocol</a>, and
+<a href="https://otr.cypherpunks.ca/Protocol-v3-4.0.0.html">OTR</a>.
+It was designed for high security and obfuscation of ciphertexts and metadata.</p>
+
+<h1>Dependencies</h1>
 
 <pre><code>* python 2.7
 * irssi-python
@@ -11,7 +23,7 @@ distribution's repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.</p>
 
-<p>Commands:</p>
+<h1>Commands</h1>
 
 <pre><code>* /listkeys            - lists all known keys
 * /setkey &lt;nick&gt; &lt;key&gt; - saves a key for a nickname.
@@ -19,3 +31,148 @@ with irssi v0.8.17.</p>
 </code></pre>
 
 <p>Currently in beta, please report any bugs.</p>
+
+<h1>Protocol description:</h1>
+
+<ul>
+<li>aes256, gcm mode</li>
+<li>curve25519</li>
+<li>hmac-sha256</li>
+<li>hkdf with protocol id 'cryptchats-protocol-v1'</li>
+</ul>
+
+<p>Each user has a long term ed25519 key that is generated when the script
+is first loaded. The public key should be shared over a secure channel
+prior to communicating with cryptchats, we use key pinning to simplify
+the key exchange and to prevent man-in-the-middle attacks.</p>
+
+<p>To preserve forward secrecy, each message is prepended with the next ephemeral
+public key. Bob (the receiver) responds with his own ephemeral key acknowledging
+the new key. Once he does that, Alice can begin using the new key where she'll
+immediately generate a new key. If a key exchange is not acknowledged, Alice can
+use the same key to encrypt the next several message to allow for network latency
+or other delivery problems.</p>
+
+<p>Alice and Bob use seperate keys for encryption and decryption.</p>
+
+<h2>Key derivation</h2>
+
+<p>After Alice and Bob have exchanged keys, they derive several 256-bit encryption keys for
+HMAC keys, message keys, key exchanges keys, and the GCM counters.</p>
+
+<h3>Generating the key seed in the initial key exchange</h3>
+
+<p>In the initial key exchange we don't yet have ephemeral keys to use, so we
+just use the identity keys.</p>
+
+<pre><code>key_seed = ECDH(alice_long_term, bob_long_term)
+</code></pre>
+
+<h3>Generating session key seeds</h3>
+
+<p>After the initial key exchange, all messages should use a key seed created by concatenating
+the shared keys of Alice and Bob's longterms with the other's ephemeral and their two
+ephemeral key's shared key:</p>
+
+<pre><code>key_seed = ECDH(alice_ephemeral, bob_long_term) | ECDH(alice_long_term, bob_ephemeral) |
+    ECDH(alice_ephemeral, bob_ephemeral)
+</code></pre>
+
+<h3>Deriving keys</h3>
+
+<p>Once the key seed is generated, an HMAC key is derived from the 96-byte HKDF of the message
+counter (a tally of all messages encrypted with this key, starting with zero) which is then
+used to HMAC the key seed. This value is then passed through the HKDF to generate the
+192-byte master key.</p>
+
+<pre><code>hmac_key = HKDF(counter, 96)
+master = HKDF(HMAC(key_seed, hmac_key), 192)
+</code></pre>
+
+<p>From this master key we derive a series of 256-bit keys:</p>
+
+<pre><code>message_key | exchange_key | chaff_key | exchange_chaff_key | message_counter |
+    exchange_counter
+</code></pre>
+
+<h2>Message encryption</h2>
+
+<h3>Initial key exchange</h3>
+
+<p>To begin a session with Bob, Alice first generates a random counter and
+two ephemeral keys - one for receiving and one for sending. Alice computes
+a shared key with Bob using the method above (we discard the generated message
+counter and use a random one because this key will never change). She then
+encrypts her ephemeral keys with the <code>message_key</code> and sends these to Bob:</p>
+
+<pre><code>random_counter = random(16)
+message = alice_ephemeral_receiving | alice_ephemeral_sending
+ct, tag = AES(message, message_key, random_counter)
+ct = counter | tag | ct
+</code></pre>
+
+<p>For chaffing, Alice will use the generated <code>chaff_key</code>. Bob does the same thing
+when responding, except the message is reversed:</p>
+
+<pre><code>message = bob_ephemeral_sending | bob_ephemeral_receiving
+</code></pre>
+
+<h3>Encrypting messages</h3>
+
+<p>To send an encrypted message, Alice first derives the master keys. If Alice has not sent
+any messages using the current ephemeral key, she generates a new ephemeral key. If she
+has, then Alice will resend the previously generated ephemeral key.</p>
+
+<pre><code>message = alice_ephemeral | message
+ct, tag = AES(message, message_key, message_counter)
+ct = tag | ct
+</code></pre>
+
+<p>For chaffing, Alice will use the generated <code>chaff_key</code>. After sending the message,
+Alice increments the send counter.</p>
+
+<h3>Encrypting key exchanges</h3>
+
+<p>When encrypting key exchange responses, Alice still uses her normal send key but does not
+send a new ephemeral key for sending, only one for receiving (that is, key exchange
+acknowledgements do not result in further key exchanges). She generates a new ephemeral
+key and encrypts it with the exchange keys.</p>
+
+<pre><code>message = alice_receive_ephemeral
+ct, tag = AES(message, exchange_key, exchange_counter)
+ct = tag | ct
+</code></pre>
+
+<p>For chaffing, Alice will use the generated <code>exchange_chaff_key</code> and she increments the
+send counter after sending the key exchange message.</p>
+
+<h2>Chaffing</h2>
+
+<p>In order to futher obfuscate encrypted messages we use 
+<a href="https://en.wikipedia.org/wiki/Chaffing_and_winnowing">chaffing</a> to introduce random
+blocks into the message. This hinders the attacker by ensuring the attacker can
+never know which blocks even are ciphertext.</p>
+
+<p>The ciphertext is broken into 8-byte blocks and each of these blocks is HMACed using the
+derived chaff key. These pairs of blocks (block and HMAC) are then arranged in order with
+the HMACs truncated to 8-bytes. Next, random block pairs are introduced randomly between
+the block pairs until a fixed message length is reached.</p>
+
+<pre><code>block_pairs = []
+
+for all eight byte blocks in ct
+    block_pairs.append(block, HMAC(block, chaff_key))
+
+while len(block_pairs) &lt; fixed_block_num
+    block_pairs.random_insert(random_block_pair)
+</code></pre>
+
+<h2>Winnowing</h2>
+
+<p>To winnow the message ("de-chaff"), we iterate over block pairs and check the chaff keys.
+If the exchange chaff key matches, then we know this is a key exchange message. If the
+message chaff key matches, then we know it is a message for Alice. The final key to check
+is the key exchange key, which allows Bob to initiate a key exchange at any time in case
+of session loss. Once we have settled on a key, we discard block pairs with incorrect
+HMACs and rebuild the ciphertext. Clients should try several send counters if the keys
+do not work to ensure that dropped messages do not disrupt chats.</p>
