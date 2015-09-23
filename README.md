@@ -17,7 +17,7 @@ It was designed for high security and obfuscation of ciphertexts and metadata.
     * python-cryptography
     * curve25519-donna
 
-cryptography and curve25519-donna can be install from pip or your
+cryptography and curve25519-donna can be installed from pip or your
 distribution's repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.
@@ -30,7 +30,7 @@ with irssi v0.8.17.
 
 Currently in beta, please report any bugs.
 
-# Protocol description:
+# Protocol description
 
 * aes256, gcm mode
 * curve25519
@@ -74,9 +74,9 @@ ephemeral key's shared key:
 
 ### Deriving keys
 
-Once the key seed is generated, an the key seed is concatenated with the message counter (a
+Once the key seed is generated, the key seed is concatenated with the message counter (a
 tally of all messages encrypted with this key, starting with zero) as literal string digits
-(e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'.This value is
+(e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'. This value is
 then passed through the HKDF to generate the 192-byte master key.
 
     hmac_key = proto_id | ':mac'
