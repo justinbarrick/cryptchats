@@ -163,21 +163,24 @@ def privmsg_out(msg, server, query, command=False):
     elif nick not in keys:
         return 0
 
-    if command:
-        pt = '\x01ACTION ' + msg + '\x01'
-    else:
-        pt = msg
+    while msg:
+        tmp_msg, msg = msg[:96], msg[96:]
 
-    silent_send(server, nick, chats[nick].encrypt_msg(pt))
+        if command:
+            pt = '\x01ACTION ' + tmp_msg + '\x01'
+        else:
+            pt = tmp_msg
 
-    if command:
-        form = 'own_action'
-    else:
-        form = 'own_msg'
+        silent_send(server, nick, chats[nick].encrypt_msg(pt))
 
-    printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [ 
-        my_nick, '\x0302' + msg
-    ])
+        if command:
+            form = 'own_action'
+        else:
+            form = 'own_msg'
+
+        printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [ 
+            my_nick, '\x0302' + tmp_msg
+        ])
 
     irssi.signal_stop()
     return 1
