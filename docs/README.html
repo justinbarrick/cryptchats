@@ -23,6 +23,22 @@ distribution's repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.</p>
 
+<h1>Setup</h1>
+
+<p>Install the dependencies and setup cryptchats:</p>
+
+<p><code>
+$ sudo apt-get install python-dev build-essential
+$ sudo apt-get build-dep irssi
+$ ./install-irssi-python.sh
+$ sudo pip install cryptography curve25519-donna
+$ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
+$ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
+$ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
+$ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/autorun
+$ echo load python &gt;&gt; .irssi/startup
+</code></p>
+
 <h1>Commands</h1>
 
 <pre><code>* /listkeys            - lists all known keys
