@@ -34,7 +34,6 @@ $ sudo pip install cryptography curve25519-donna
 $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
 $ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
 $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
-$ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/autorun
 $ echo load python >> .irssi/startup
 ```
 
