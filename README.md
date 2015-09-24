@@ -26,16 +26,14 @@ with irssi v0.8.17.
 
 Install the dependencies and setup cryptchats:
 
-```
-$ sudo apt-get install python-dev build-essential
-$ sudo apt-get build-dep irssi
-$ ./install-irssi-python.sh
-$ sudo pip install cryptography curve25519-donna
-$ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
-$ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
-$ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
-$ echo load python >> .irssi/startup
-```
+    $ sudo apt-get install python-dev build-essential
+    $ sudo apt-get build-dep irssi
+    $ ./install-irssi-python.sh
+    $ sudo pip install cryptography curve25519-donna
+    $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
+    $ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
+    $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
+    $ echo load python >> .irssi/startup
 
 # Commands
 
