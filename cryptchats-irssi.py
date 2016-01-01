@@ -16,17 +16,22 @@ key_path = __file__.replace('scripts/autorun/%s.py' % __name__, 'keys.json')
 key_path = key_path.replace('scripts/%s.py' % __name__, 'keys.json')
 debug = False
 
+def fix_key_perms():
+    os.chmod(key_path, 0600)
+
 def save_keys():
     tmp_keys = {}
 
     for key in keys:
         tmp_keys[key] = b64encode(keys[key].serialize())
 
-    json.dump(tmp_keys, open(key_path, 'w'))
+    json.dump(tmp_keys, os.fdopen(os.open(key_path, os.O_WRONLY | os.O_CREAT,
+        0600), 'w'))
 
 def load_keys():
     try:
         tmp_keys = json.load(open(key_path))
+        fix_key_perms()
     except:
         keys['my_key'] = curve25519.Private()
         save_keys()
@@ -74,7 +79,7 @@ def listkeys(data, server, witem):
     return
 
 def keyx(data, server, witem):
-    nick = data
+    nick = data.rstrip()
 
     if nick not in keys:
         return 
@@ -98,6 +103,8 @@ def privmsg_in(server, msg, nick, user):
     elif nick not in keys:
         return 0
 
+    window = server.window_item_find(nick)
+
     try:
         msg = chats[nick].decrypt_msg(b64decode(msg))
     except ChatsError:
@@ -110,13 +117,13 @@ def privmsg_in(server, msg, nick, user):
 
     if msg and 'keyx' in msg:
         if msg['keyx'] == True:
-            print 'Key exchange with %s completed.' % nick
+            window.prnt('Key exchange with %s completed.' % nick)
         else:
+            if 'msg' not in msg:
+                window.prnt('Received key exchange from %s.' % nick)
             silent_send(server, nick, msg['keyx'])
 
     if msg and 'msg' in msg:
-        window = server.window_item_find(nick)
-
         msg['msg'] = msg['msg'].replace('\0', '')
 
         action = re.search('^\x01ACTION (.*)\x01$', msg['msg'])

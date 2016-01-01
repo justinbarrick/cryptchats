@@ -50,7 +50,7 @@ Currently in beta, please report any bugs.
 * hmac-sha512 (hmac-sha256 for chaffing)
 * hkdf with proto_id 'cryptchats-protocol-v1'
 
-Each user has a long term ed25519 key that is generated when the script
+Each user has a long term curve25519 key that is generated when the script
 is first loaded. The public key should be shared over a secure channel
 prior to communicating with cryptchats, we use key pinning to simplify
 the key exchange and to prevent man-in-the-middle attacks.
