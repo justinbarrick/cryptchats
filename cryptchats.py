@@ -273,6 +273,9 @@ class Chats(object):
             self.send_pending['msgs'] = []
         self.send_pending['msgs'].append(msg)
 
+        if 'bob' not in self.receive:
+            return
+
         ct, tag = self.encrypt_aes(self.send['message_key'],
             self.send['message_counter'], pt)
 

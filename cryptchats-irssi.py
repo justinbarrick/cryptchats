@@ -55,6 +55,36 @@ def b64encode(_str):
 def silent_send(server, nick, msg):
     server.command('^msg -%s %s %s' % (server.tag, nick, b64encode(msg)))
 
+def send_msg(server, nick, msg, command=False, resent=False):
+    index = 96 if not command else 87
+
+    while msg:
+        tmp_msg, msg = msg[:index], msg[index:]
+
+        if command:
+            pt = '\x01ACTION ' + tmp_msg + '\x01'
+        else:
+            pt = tmp_msg
+
+        ct = chats[nick].encrypt_msg(pt)
+        if not ct:
+            return
+
+        silent_send(server, nick, ct)
+
+        if command or pt[:7] == '\x01ACTION':
+            form = 'own_action'
+        else:
+            form = 'own_msg'
+
+        color = '\x0302'
+        if resent:
+            color = '\x0306[RESENT] ' + color
+
+        printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [
+            server.nick, color + tmp_msg
+        ])
+
 def setkey(data, server, witem):
     data = data.split(' ')
 
@@ -146,7 +176,7 @@ def privmsg_in(server, msg, nick, user):
     if msg and 'msgs' in msg and msg['msgs']:
         window.prnt('Re-sending un-acked messages to %s.' % nick)
         for msg in msg['msgs']:
-            silent_send(server, nick, chats[nick].encrypt_msg(msg))
+            send_msg(server, nick, msg, resent=True)
 
     irssi.signal_stop()
     return 1
@@ -156,7 +186,6 @@ def privmsg_out(msg, server, query, command=False):
         return 0
 
     nick = query.name
-    my_nick = server.nick
 
     if command:
         msg = msg.split()
@@ -177,32 +206,11 @@ def privmsg_out(msg, server, query, command=False):
     if nick in keys and nick not in chats:
         chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
             chaff_block_size=8, debug=debug)
-
         silent_send(server, nick, chats[nick].encrypt_initial_keyx())
-        irssi.signal_stop()
-        return 1
     elif nick not in keys:
         return 0
 
-    while msg:
-        tmp_msg, msg = msg[:96], msg[96:]
-
-        if command:
-            pt = '\x01ACTION ' + tmp_msg + '\x01'
-        else:
-            pt = tmp_msg
-
-        silent_send(server, nick, chats[nick].encrypt_msg(pt))
-
-        if command:
-            form = 'own_action'
-        else:
-            form = 'own_msg'
-
-        printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [ 
-            my_nick, '\x0302' + tmp_msg
-        ])
-
+    send_msg(server, nick, msg, command=command)
     irssi.signal_stop()
     return 1
 
