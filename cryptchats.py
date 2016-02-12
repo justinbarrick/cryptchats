@@ -369,16 +369,16 @@ class Chats(object):
                 print ':('
                 return None
 
+            msgs = []
+            if self.send_pending and 'msgs' in self.send_pending:
+                msgs = self.send_pending['msgs']
+                self.send_pending['msgs'] = []
+
             if self.i_am_alice and ack:
                 self.receive_key(bob_ephem1)
                 self.send_key(bob_ephem2)
-                return { 'keyx': True }
+                return { 'keyx': True, 'msgs': msgs }
             elif not ack:
-                # flush the message buffer
-                msgs = []
-                if self.send_pending and 'msgs' in self.send_pending:
-                    msgs = self.send_pending['msgs']
-                    self.send_pending['msgs'] = []
                 self.init_keys()
                 self.send_key(bob_ephem1)
                 self.receive_key(bob_ephem2)
