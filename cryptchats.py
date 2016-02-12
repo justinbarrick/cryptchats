@@ -268,6 +268,11 @@ class Chats(object):
         pt  = self.get_public(self.send_pending['alice'])
         pt += msg
 
+        # message buffering
+        if 'msgs' not in self.send_pending:
+            self.send_pending['msgs'] = []
+        self.send_pending['msgs'].append(msg)
+
         ct, tag = self.encrypt_aes(self.send['message_key'],
             self.send['message_counter'], pt)
 
@@ -323,7 +328,6 @@ class Chats(object):
 
             while not exchange_blocks and not blocks and key['counter'] < 20:
                 key = self.derive_keys(key)
-                self.print_key('Testing.', key)
 
                 for block_pair in self.get_block_pairs(ct):
                     if self.hmac(key['chaff_key'], block_pair[0], self.chaff_block_size) \
@@ -370,10 +374,15 @@ class Chats(object):
                 self.send_key(bob_ephem2)
                 return { 'keyx': True }
             elif not ack:
+                # flush the message buffer
+                msgs = []
+                if self.send_pending and 'msgs' in self.send_pending:
+                    msgs = self.send_pending['msgs']
+                    self.send_pending['msgs'] = []
                 self.init_keys()
                 self.send_key(bob_ephem1)
                 self.receive_key(bob_ephem2)
-                return { 'keyx': self.encrypt_initial_keyx() }
+                return { 'keyx': self.encrypt_initial_keyx(), 'msgs': msgs }
             else:
                 print ';o'
                 return None

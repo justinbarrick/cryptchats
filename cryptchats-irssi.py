@@ -78,6 +78,16 @@ def listkeys(data, server, witem):
 
     return
 
+def create_chats(nick):
+    if nick not in keys:
+        return None
+
+    if nick not in chats:
+        chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
+            chaff_block_size=8, debug=debug)
+
+    return chats[nick]
+
 def keyx(data, server, witem):
     nick = data.rstrip()
 
@@ -88,22 +98,16 @@ def keyx(data, server, witem):
         print 'Usage: /keyx <nick>'
         return
 
-    chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
-        chaff_block_size=8, debug=debug)
-
+    create_chats(nick).init_keys()
     silent_send(server, nick, chats[nick].encrypt_initial_keyx())
     return 
 
 def privmsg_in(server, msg, nick, user):
     omsg = msg
 
-    if nick in keys and nick not in chats:
-        chats[nick] = Chats(keys['my_key'], keys[nick], max_length=400,
-            chaff_block_size=8, debug=debug)
-    elif nick not in keys:
-        return 0
-
     window = server.window_item_find(nick)
+    if not create_chats(nick):
+        return 0
 
     try:
         msg = chats[nick].decrypt_msg(b64decode(msg))
@@ -111,6 +115,8 @@ def privmsg_in(server, msg, nick, user):
         if len(msg) != 384:
             window = server.window_item_find(nick)
             printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg', [ nick, '\x0305' + omsg ])
+        else:
+            keyx(nick, server, None)
         msg = None
     except TypeError:
         return 0
@@ -133,6 +139,11 @@ def privmsg_in(server, msg, nick, user):
             form, msg = 'pubmsg', msg['msg']
 
         printformat(window, irssi.MSGLEVEL_MSGS, form, [ nick, '\x0303' + msg ])
+
+    if msg and 'msgs' in msg and msg['msgs']:
+        window.prnt('Re-sending un-acked messages to %s.' % nick)
+        for msg in msg['msgs']:
+            silent_send(server, nick, chats[nick].encrypt_msg(msg))
 
     irssi.signal_stop()
     return 1
