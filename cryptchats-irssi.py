@@ -109,6 +109,9 @@ def privmsg_in(server, msg, nick, user):
     if not create_chats(nick):
         return 0
 
+    if re.match(r'^\[\d\d:\d\d:\d\d\] ', msg):
+        msg = msg[11:]
+
     try:
         msg = chats[nick].decrypt_msg(b64decode(msg))
     except ChatsError:
