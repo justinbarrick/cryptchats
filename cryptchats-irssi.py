@@ -81,7 +81,7 @@ def send_msg(server, nick, msg, command=False, resent=False):
         if resent:
             color = '\x0306[RESENT] ' + color
 
-        printformat(irssi.active_win(), irssi.MSGLEVEL_PUBLIC, form, [
+        printformat(server.window_item_find(nick), irssi.MSGLEVEL_PUBLIC, form, [
             server.nick, color + tmp_msg
         ])
 
@@ -148,7 +148,7 @@ def privmsg_in(server, msg, nick, user):
         if len(msg) != 384:
             window = server.window_item_find(nick)
             printformat(window, irssi.MSGLEVEL_MSGS, 'pubmsg', [ nick, '\x0305' + omsg ])
-        else:
+        elif not chats[nick].initialized or chats[nick].established():
             keyx(nick, server, None)
         msg = None
     except TypeError:

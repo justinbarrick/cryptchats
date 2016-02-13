@@ -39,13 +39,16 @@ class Chats(object):
         self.chaff_block_size = chaff_block_size
         self.cipher_block_size = AES.block_size / 8
 
-        self.initial_key = { 'initial_key': True }
         self.init_keys()
 
     def init_keys(self):
+        self.initialized = False
         self.initial_key = { 'initial_key': True }
         self.send = { 'alice': curve25519.Private() }
         self.receive = { 'alice': curve25519.Private(), 'receiver': True }
+
+    def established(self):
+        return 'bob' in self.receive
 
     def derive_key(self, key, length=96):
         hkdf = HKDFExpand(algorithm=SHA512(), length=length,
@@ -273,7 +276,7 @@ class Chats(object):
             self.send_pending['msgs'] = []
         self.send_pending['msgs'].append(msg)
 
-        if 'bob' not in self.receive:
+        if not self.established():
             return
 
         ct, tag = self.encrypt_aes(self.send['message_key'],
@@ -294,7 +297,8 @@ class Chats(object):
         return self.chaff(blocks)
 
     def encrypt_initial_keyx(self):
-        self.i_am_alice = 'bob' not in self.receive
+        self.i_am_alice = not self.established()
+        self.initialized = True
 
         counter = urandom(self.cipher_block_size)
         key = self.derive_keys()
