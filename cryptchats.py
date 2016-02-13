@@ -192,7 +192,8 @@ class Chats(object):
             self.receive_pending = {
                 'alice': curve25519.Private(),
                 'bob': curve25519.Public(bob_ephemeral),
-                'receiver': True
+                'receiver': True,
+                'acked': False
             }
         # uncharted territory...
         else:
@@ -289,6 +290,8 @@ class Chats(object):
         self.send = self.derive_keys(self.send)
         self.print_key('Encrypting keyx.', self.send)
 
+        self.receive_pending['acked'] = True
+
         data = self.get_public(self.receive_pending['alice'])
         ct, tag = self.encrypt_aes(self.send['exchange_key'],
             self.send['exchange_counter'], data)
@@ -331,23 +334,20 @@ class Chats(object):
             if 'counter' not in key:
                 key['counter'] = -1
             
-            original_counter = key['counter']
+            key = self.derive_keys(key)
 
-            while not exchange_blocks and not blocks and key['counter'] < 20:
-                key = self.derive_keys(key)
+            for block_pair in self.get_block_pairs(ct):
+                if self.hmac(key['chaff_key'], block_pair[0], self.chaff_block_size) \
+                  == block_pair[1]:
+                    blocks.append(block_pair[0])
+                elif self.hmac(key['exchange_chaff_key'], block_pair[0],
+                  self.chaff_block_size) == block_pair[1]:
+                    exchange_blocks.append(block_pair[0])
 
-                for block_pair in self.get_block_pairs(ct):
-                    if self.hmac(key['chaff_key'], block_pair[0], self.chaff_block_size) \
-                      == block_pair[1]:
-                        blocks.append(block_pair[0])
-                    elif self.hmac(key['exchange_chaff_key'], block_pair[0],
-                      self.chaff_block_size) == block_pair[1]:
-                        exchange_blocks.append(block_pair[0])
-                    
             if blocks or exchange_blocks:
                 break
             else:
-                key['counter'] = original_counter
+                key['counter'] -= 1
 
         if blocks or exchange_blocks:
             if key == self.initial_key:
@@ -398,7 +398,7 @@ class Chats(object):
             self.print_key('Decrypting message.', self.receive)
             msg = self.decrypt_aes_msg(ct[16:], ct[:16], self.receive)
 
-            if self.receive_pending:
+            if self.receive_pending and not self.receive_pending['acked']:
                 return { 'msg': msg, 'keyx': self.encrypt_keyx() }
             else:
                 return { 'msg': msg }

@@ -167,11 +167,11 @@ def privmsg_in(server, msg, nick, user):
 
         action = re.search('^\x01ACTION (.*)\x01$', msg['msg'])
         if action:
-            form, msg = 'action_public', action.group(1)
+            form, prntmsg = 'action_public', action.group(1)
         else:
-            form, msg = 'pubmsg', msg['msg']
+            form, prntmsg = 'pubmsg', msg['msg']
 
-        printformat(window, irssi.MSGLEVEL_MSGS, form, [ nick, '\x0303' + msg ])
+        printformat(window, irssi.MSGLEVEL_MSGS, form, [ nick, '\x0303' + prntmsg ])
 
     if msg and 'msgs' in msg and msg['msgs']:
         window.prnt('Re-sending un-acked messages to %s.' % nick)
