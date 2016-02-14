@@ -14,11 +14,11 @@ It was designed for high security and obfuscation of ciphertexts and metadata.
 
     * python 2.7
     * irssi-python
-    * python-cryptography
     * curve25519-donna
-    * pynacl
+    * libnacl
+    * hkdf
 
-cryptography and curve25519-donna can be installed from pip or your
+hkdf, libnacl, and curve25519-donna can be installed from pip or your
 distribution's repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.
@@ -51,7 +51,7 @@ Currently in beta, please report any bugs.
 
 * salsa20 with Pol1305
 * curve25519
-* hmac-sha512 (hmac-sha256 for chaffing)
+* Poly1305
 * hkdf with proto_id 'cryptchats-protocol-v1'
 
 Each user has a long term curve25519 key that is generated when the script
@@ -71,7 +71,7 @@ Alice and Bob use seperate keys for encryption and decryption.
 ## Key derivation
 
 After Alice and Bob have exchanged keys, they derive several 256-bit encryption keys for
-HMAC keys, message keys, key exchanges keys, and the GCM counters.
+MAC keys, message keys, key exchanges keys, and the nonce.
 
 ### Generating the key seed in the initial key exchange
 
@@ -93,11 +93,11 @@ ephemeral key's shared key:
 
 Once the key seed is generated, the key seed is concatenated with the message counter (a
 tally of all messages encrypted with this key, starting with zero) as literal string digits
-(e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'. This value is
-then passed through the HKDF to generate the 176-byte master key.
+(e.g. '0') and then MACed with the key of 'cryptchats-protocol-v1::poly1305'. This
+value is then passed through the HKDF with SHA512 to generate the 176-byte master key.
 
     hmac_key = proto_id | ':mac'
-    master = HKDF(HMAC(key_seed | str(counter), hmac_key), 176)
+    master = HKDF(Poly1305(key_seed | str(counter), hmac_key), 176)
 
 From this master key we derive a series of 256-bit keys:
 
@@ -163,15 +163,15 @@ In order to futher obfuscate encrypted messages we use
 blocks into the message. This hinders the attacker by ensuring the attacker can
 never know which blocks even are ciphertext.
 
-The ciphertext is broken into 8-byte blocks and each of these blocks is HMACed using the
-derived chaff key. These pairs of blocks (block and HMAC) are then arranged in order with
-the HMACs truncated to 8-bytes. Next, random block pairs are introduced randomly between
+The ciphertext is broken into 8-byte blocks and each of these blocks is MACed using the
+derived chaff key. These pairs of blocks (block and MAC) are then arranged in order with
+the MACs truncated to 8-bytes. Next, random block pairs are introduced randomly between
 the block pairs until a fixed message length is reached.
 
     block_pairs = []
 
     for all eight byte blocks in ct
-        block_pairs.append(block, HMAC(block, chaff_key))
+        block_pairs.append(block, Poly1305(block, chaff_key))
 
     while len(block_pairs) < fixed_block_num
         block_pairs.random_insert(random_block_pair)
@@ -183,5 +183,5 @@ If the exchange chaff key matches, then we know this is a key exchange message. 
 message chaff key matches, then we know it is a message for Alice. The final key to check
 is the key exchange key, which allows Bob to initiate a key exchange at any time in case
 of session loss. Once we have settled on a key, we discard block pairs with incorrect
-HMACs and rebuild the ciphertext. Clients should try several send counters if the keys
+MACs and rebuild the ciphertext. Clients should try several send counters if the keys
 do not work to ensure that dropped messages do not disrupt chats.

@@ -14,11 +14,11 @@ It was designed for high security and obfuscation of ciphertexts and metadata.</
 
 <pre><code>* python 2.7
 * irssi-python
-* python-cryptography
 * curve25519-donna
-* pynacl</code></pre>
+* libnacl
+* hkdf</code></pre>
 
-<p>cryptography and curve25519-donna can be installed from pip or your
+<p>hkdf, libnacl, and curve25519-donna can be installed from pip or your
 distribution&#39;s repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.</p>
@@ -49,7 +49,7 @@ $ echo &quot;alias irssi=&#39;source ~/.cryptchats/bin/activate &amp;&amp; irssi
 
 <h1>Protocol description</h1>
 
-<ul><li>salsa20 with Pol1305</li><li>curve25519</li><li>hmac-sha512 (hmac-sha256 for chaffing)</li><li>hkdf with proto_id &#39;cryptchats-protocol-v1&#39;</li></ul>
+<ul><li>salsa20 with Pol1305</li><li>curve25519</li><li>Poly1305</li><li>hkdf with proto_id &#39;cryptchats-protocol-v1&#39;</li></ul>
 
 <p>Each user has a long term curve25519 key that is generated when the script
 is first loaded. The public key should be shared over a secure channel
@@ -68,7 +68,7 @@ or other delivery problems.</p>
 <h2>Key derivation</h2>
 
 <p>After Alice and Bob have exchanged keys, they derive several 256-bit encryption keys for
-HMAC keys, message keys, key exchanges keys, and the GCM counters.</p>
+MAC keys, message keys, key exchanges keys, and the nonce.</p>
 
 <h3>Generating the key seed in the initial key exchange</h3>
 
@@ -90,11 +90,11 @@ ephemeral key&#39;s shared key:</p>
 
 <p>Once the key seed is generated, the key seed is concatenated with the message counter (a
 tally of all messages encrypted with this key, starting with zero) as literal string digits
-(e.g. &#39;0&#39;) and then HMACed with the hmac key of &#39;cryptchats-protocol-v1:mac&#39;. This value is
-then passed through the HKDF to generate the 176-byte master key.</p>
+(e.g. &#39;0&#39;) and then MACed with the key of &#39;cryptchats-protocol-v1::poly1305&#39;. This
+value is then passed through the HKDF with SHA512 to generate the 176-byte master key.</p>
 
 <pre><code>hmac_key = proto_id | &#39;:mac&#39;
-master = HKDF(HMAC(key_seed | str(counter), hmac_key), 176)</code></pre>
+master = HKDF(Poly1305(key_seed | str(counter), hmac_key), 176)</code></pre>
 
 <p>From this master key we derive a series of 256-bit keys:</p>
 
@@ -160,15 +160,15 @@ send counter after sending the key exchange message.</p>
 blocks into the message. This hinders the attacker by ensuring the attacker can
 never know which blocks even are ciphertext.</p>
 
-<p>The ciphertext is broken into 8-byte blocks and each of these blocks is HMACed using the
-derived chaff key. These pairs of blocks (block and HMAC) are then arranged in order with
-the HMACs truncated to 8-bytes. Next, random block pairs are introduced randomly between
+<p>The ciphertext is broken into 8-byte blocks and each of these blocks is MACed using the
+derived chaff key. These pairs of blocks (block and MAC) are then arranged in order with
+the MACs truncated to 8-bytes. Next, random block pairs are introduced randomly between
 the block pairs until a fixed message length is reached.</p>
 
 <pre><code>block_pairs = []
 
 for all eight byte blocks in ct
-    block_pairs.append(block, HMAC(block, chaff_key))
+    block_pairs.append(block, Poly1305(block, chaff_key))
 
 while len(block_pairs) &lt; fixed_block_num
     block_pairs.random_insert(random_block_pair)</code></pre>
@@ -180,5 +180,5 @@ If the exchange chaff key matches, then we know this is a key exchange message. 
 message chaff key matches, then we know it is a message for Alice. The final key to check
 is the key exchange key, which allows Bob to initiate a key exchange at any time in case
 of session loss. Once we have settled on a key, we discard block pairs with incorrect
-HMACs and rebuild the ciphertext. Clients should try several send counters if the keys
+MACs and rebuild the ciphertext. Clients should try several send counters if the keys
 do not work to ensure that dropped messages do not disrupt chats.</p>

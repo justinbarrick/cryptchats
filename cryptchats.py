@@ -1,18 +1,13 @@
 #!/usr/bin/python2
-from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
-from cryptography.hazmat.primitives.hashes import SHA256, SHA512, Hash
-from cryptography.hazmat.primitives.hmac import HMAC
-from cryptography.hazmat.backends import default_backend
-
-import nacl.secret
-import nacl.utils
+import curve25519
+import hkdf
+import libnacl
+from libnacl import crypto_onetimeauth as poly1305
 
 from os import urandom
 from random import SystemRandom
-import curve25519
 import struct
 
-bend = default_backend()
 rand = SystemRandom()
 
 class ChatsError(Exception):
@@ -37,7 +32,7 @@ class Chats(object):
         # this gets the pre-base64 length, 480 bytes after base64 seems good for IRC.
         self.max_length = max_length * 3 / 4
         self.chaff_block_size = chaff_block_size
-        self.cipher_nonce_size = nacl.secret.SecretBox.NONCE_SIZE
+        self.cipher_nonce_size = libnacl.crypto_box_NONCEBYTES
 
         self.init_keys()
 
@@ -51,18 +46,7 @@ class Chats(object):
         return 'bob' in self.receive
 
     def derive_key(self, key, length=96):
-        hkdf = HKDFExpand(algorithm=SHA512(), length=length,
-            info=self.proto_id, backend=bend)
-        return hkdf.derive(key)
-
-    def hmac(self, key, msg, truncate=None, algorithm=SHA256):
-        hmac = HMAC(key, algorithm=algorithm(), backend=bend)
-        hmac.update(msg)
-
-        if truncate:
-            return hmac.finalize()[:truncate]
-        else:
-            return hmac.finalize()
+        return hkdf.hkdf_expand(key, self.proto_id, length)
 
     def chaff(self, blocks):
         length = self.max_length / self.chaff_block_size
@@ -100,7 +84,7 @@ class Chats(object):
         blocks = []
 
         for block in self.get_blocks(ct):
-            mac = self.hmac(key, block)[:self.chaff_block_size]
+            mac = poly1305(block, key)[:self.chaff_block_size]
             blocks.append([ block, mac ])
 
         return blocks
@@ -109,11 +93,11 @@ class Chats(object):
         if len(pt) % 16:
             pt += '\x00' * (16 - len(pt) % 16)
 
-        return nacl.secret.SecretBox(key).encrypt(pt, counter)[self.cipher_nonce_size:]
+        return libnacl.crypto_secretbox(pt, counter, key)
 
     def decrypt(self, ct, key, counter):
         try:
-            return nacl.secret.SecretBox(key).decrypt(ct, counter)
+            return libnacl.crypto_secretbox_open(ct, counter, key)
         except:
             return None
 
@@ -204,8 +188,8 @@ class Chats(object):
         else:
             key['counter'] = 0
 
-        hmac_key = self.proto_id + ':mac'
-        master = self.hmac(master + str(key['counter']), hmac_key, algorithm=SHA512)
+        mac_key = self.proto_id + '::poly1305'
+        master = poly1305(master + str(key['counter']), mac_key)
         master = self.derive_key(master, 176)
         
         keys = list(struct.unpack('>32s32s32s32s24s24s', master))
@@ -311,11 +295,11 @@ class Chats(object):
             key = self.derive_keys(key)
 
             for block_pair in self.get_block_pairs(ct):
-                if self.hmac(key['chaff_key'], block_pair[0], self.chaff_block_size) \
+                if poly1305(block_pair[0], key['chaff_key'])[:self.chaff_block_size] \
                   == block_pair[1]:
                     blocks.append(block_pair[0])
-                elif self.hmac(key['exchange_chaff_key'], block_pair[0],
-                  self.chaff_block_size) == block_pair[1]:
+                elif poly1305(block_pair[0],
+                  key['exchange_chaff_key'])[:self.chaff_block_size] == block_pair[1]:
                     exchange_blocks.append(block_pair[0])
 
             if blocks or exchange_blocks:
