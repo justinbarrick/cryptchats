@@ -16,10 +16,10 @@ It was designed for high security and obfuscation of ciphertexts and metadata.</
 * irssi-python
 * python-cryptography
 * curve25519-donna
-</code></pre>
+* pynacl</code></pre>
 
 <p>cryptography and curve25519-donna can be installed from pip or your
-distribution's repositories. If your distribution does not have an
+distribution&#39;s repositories. If your distribution does not have an
 irssi-python package, I have included an install script that works
 with irssi v0.8.17.</p>
 
@@ -30,39 +30,35 @@ with irssi v0.8.17.</p>
 <pre><code>$ sudo apt-get install python-dev build-essential
 $ sudo apt-get build-dep irssi
 $ ./install-irssi-python.sh
-$ sudo pip install cryptography curve25519-donna
+$ virtualenv ~/.cryptchats
+$ source ~/.cryptchats/bin/activate
+$ pip install -r requirements.txt
 $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
 $ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
 $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
 $ echo load python &gt;&gt; .irssi/startup
-</code></pre>
+$ echo &quot;alias irssi=&#39;source ~/.cryptchats/bin/activate &amp;&amp; irssi&#39;&quot; &gt;&gt; ~/.bashrc</code></pre>
 
 <h1>Commands</h1>
 
 <pre><code>* /listkeys            - lists all known keys
 * /setkey &lt;nick&gt; &lt;key&gt; - saves a key for a nickname.
-* /keyx &lt;nick&gt;         - manual key exchange with a user.
-</code></pre>
+* /keyx &lt;nick&gt;         - manual key exchange with a user.</code></pre>
 
 <p>Currently in beta, please report any bugs.</p>
 
 <h1>Protocol description</h1>
 
-<ul>
-<li>aes256, gcm mode</li>
-<li>curve25519</li>
-<li>hmac-sha512 (hmac-sha256 for chaffing)</li>
-<li>hkdf with proto_id 'cryptchats-protocol-v1'</li>
-</ul>
+<ul><li>salsa20 with Pol1305</li><li>curve25519</li><li>hmac-sha512 (hmac-sha256 for chaffing)</li><li>hkdf with proto_id &#39;cryptchats-protocol-v1&#39;</li></ul>
 
-<p>Each user has a long term ed25519 key that is generated when the script
+<p>Each user has a long term curve25519 key that is generated when the script
 is first loaded. The public key should be shared over a secure channel
 prior to communicating with cryptchats, we use key pinning to simplify
 the key exchange and to prevent man-in-the-middle attacks.</p>
 
 <p>To preserve forward secrecy, each message is prepended with the next ephemeral
 public key. Bob (the receiver) responds with his own ephemeral key acknowledging
-the new key. Once he does that, Alice can begin using the new key where she'll
+the new key. Once he does that, Alice can begin using the new key where she&#39;ll
 immediately generate a new key. If a key exchange is not acknowledged, Alice can
 use the same key to encrypt the next several message to allow for network latency
 or other delivery problems.</p>
@@ -76,38 +72,34 @@ HMAC keys, message keys, key exchanges keys, and the GCM counters.</p>
 
 <h3>Generating the key seed in the initial key exchange</h3>
 
-<p>In the initial key exchange we don't yet have ephemeral keys to use, so we
+<p>In the initial key exchange we don&#39;t yet have ephemeral keys to use, so we
 just use the identity keys.</p>
 
-<pre><code>key_seed = ECDH(alice_long_term, bob_long_term)
-</code></pre>
+<pre><code>key_seed = ECDH(alice_long_term, bob_long_term)</code></pre>
 
 <h3>Generating session key seeds</h3>
 
 <p>After the initial key exchange, all messages should use a key seed created by concatenating
-the shared keys of Alice and Bob's longterms with the other's ephemeral and their two
-ephemeral key's shared key:</p>
+the shared keys of Alice and Bob&#39;s longterms with the other&#39;s ephemeral and their two
+ephemeral key&#39;s shared key:</p>
 
 <pre><code>key_seed = ECDH(alice_ephemeral, bob_long_term) | ECDH(alice_long_term, bob_ephemeral) |
-    ECDH(alice_ephemeral, bob_ephemeral)
-</code></pre>
+    ECDH(alice_ephemeral, bob_ephemeral)</code></pre>
 
 <h3>Deriving keys</h3>
 
 <p>Once the key seed is generated, the key seed is concatenated with the message counter (a
 tally of all messages encrypted with this key, starting with zero) as literal string digits
-(e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'. This value is
-then passed through the HKDF to generate the 192-byte master key.</p>
+(e.g. &#39;0&#39;) and then HMACed with the hmac key of &#39;cryptchats-protocol-v1:mac&#39;. This value is
+then passed through the HKDF to generate the 176-byte master key.</p>
 
-<pre><code>hmac_key = proto_id | ':mac'
-master = HKDF(HMAC(key_seed | str(counter), hmac_key), 192)
-</code></pre>
+<pre><code>hmac_key = proto_id | &#39;:mac&#39;
+master = HKDF(HMAC(key_seed | str(counter), hmac_key), 176)</code></pre>
 
 <p>From this master key we derive a series of 256-bit keys:</p>
 
 <pre><code>message_key | exchange_key | chaff_key | exchange_chaff_key | message_counter |
-    exchange_counter
-</code></pre>
+    exchange_counter</code></pre>
 
 <h2>Message encryption</h2>
 
@@ -119,22 +111,20 @@ a shared key with Bob using the method above (we discard the generated message
 counter and use a random one because this key will never change). She then
 encrypts her ephemeral keys with the <code>message_key</code> and sends these to Bob:</p>
 
-<pre><code>random_counter = random(16)
+<pre><code>random_counter = random(24)
 message = alice_ephemeral_receiving | alice_ephemeral_sending
-ct, tag = AES(message, message_key, random_counter)
-ct = random_counter | tag | ct
-</code></pre>
+ct, tag = Salsa20(message, message_key, random_counter)
+ct = random_counter | tag | ct</code></pre>
 
 <p>For chaffing, Alice will use the generated <code>chaff_key</code>. Bob does the same thing
 when responding, except the message is reversed and instead of using the <code>message_key</code>
 and <code>chaff_key</code>, he uses the <code>exchange_key</code> and <code>exchange_chaff_key</code>. This allows
 the client to distinguish between fresh key exchanges and acknowledgements.</p>
 
-<pre><code>random_counter = random(16)
+<pre><code>random_counter = random(24)
 message = bob_ephemeral_sending | bob_ephemeral_receiving
-ct, tag = AES(message, exchange_key, random_counter)
-ct = random_counter | tag | ct
-</code></pre>
+ct, tag = Salsa20(message, exchange_key, random_counter)
+ct = random_counter | tag | ct</code></pre>
 
 <h3>Encrypting messages</h3>
 
@@ -143,9 +133,8 @@ any messages using the current ephemeral key, she generates a new ephemeral key.
 has, then Alice will resend the previously generated ephemeral key.</p>
 
 <pre><code>message = alice_ephemeral | message
-ct, tag = AES(message, message_key, message_counter)
-ct = tag | ct
-</code></pre>
+ct, tag = Salsa20(message, message_key, message_counter)
+ct = tag | ct</code></pre>
 
 <p>For chaffing, Alice will use the generated <code>chaff_key</code>. After sending the message,
 Alice increments the send counter.</p>
@@ -158,9 +147,8 @@ acknowledgements do not result in further key exchanges). She generates a new ep
 key and encrypts it with the exchange keys.</p>
 
 <pre><code>message = alice_receive_ephemeral
-ct, tag = AES(message, exchange_key, exchange_counter)
-ct = tag | ct
-</code></pre>
+ct, tag = Salsa20(message, exchange_key, exchange_counter)
+ct = tag | ct</code></pre>
 
 <p>For chaffing, Alice will use the generated <code>exchange_chaff_key</code> and she increments the
 send counter after sending the key exchange message.</p>
@@ -183,12 +171,11 @@ for all eight byte blocks in ct
     block_pairs.append(block, HMAC(block, chaff_key))
 
 while len(block_pairs) &lt; fixed_block_num
-    block_pairs.random_insert(random_block_pair)
-</code></pre>
+    block_pairs.random_insert(random_block_pair)</code></pre>
 
 <h2>Winnowing</h2>
 
-<p>To winnow the message ("de-chaff"), we iterate over block pairs and check the chaff keys.
+<p>To winnow the message (&quot;de-chaff&quot;), we iterate over block pairs and check the chaff keys.
 If the exchange chaff key matches, then we know this is a key exchange message. If the
 message chaff key matches, then we know it is a message for Alice. The final key to check
 is the key exchange key, which allows Bob to initiate a key exchange at any time in case

@@ -1,12 +1,12 @@
 #!/usr/bin/python2
-from cryptography.hazmat.primitives.ciphers import Cipher
-from cryptography.hazmat.primitives.ciphers.modes import GCM
-from cryptography.hazmat.primitives.ciphers.algorithms import AES
 from cryptography.hazmat.primitives.kdf.hkdf import HKDFExpand
 from cryptography.hazmat.primitives.hashes import SHA256, SHA512, Hash
 from cryptography.hazmat.primitives.hmac import HMAC
 from cryptography.hazmat.backends import default_backend
-from cryptography.exceptions import InvalidTag
+
+import nacl.secret
+import nacl.utils
+
 from os import urandom
 from random import SystemRandom
 import curve25519
@@ -37,7 +37,7 @@ class Chats(object):
         # this gets the pre-base64 length, 480 bytes after base64 seems good for IRC.
         self.max_length = max_length * 3 / 4
         self.chaff_block_size = chaff_block_size
-        self.cipher_block_size = AES.block_size / 8
+        self.cipher_nonce_size = nacl.secret.SecretBox.NONCE_SIZE
 
         self.init_keys()
 
@@ -63,11 +63,6 @@ class Chats(object):
             return hmac.finalize()[:truncate]
         else:
             return hmac.finalize()
-
-    def sha512(self, msg):
-        sha512 = Hash(SHA512(), backend=bend)
-        sha512.update(msg)
-        return sha512.finalize()
 
     def chaff(self, blocks):
         length = self.max_length / self.chaff_block_size
@@ -110,19 +105,21 @@ class Chats(object):
 
         return blocks
 
-    def encrypt_aes(self, key, counter, pt):
-        if len(pt) % self.cipher_block_size:
-            pt += '\x00' * (self.cipher_block_size - len(pt) % self.cipher_block_size)
+    def encrypt(self, pt, key, counter):
+        if len(pt) % 16:
+            pt += '\x00' * (16 - len(pt) % 16)
 
-        cipher = Cipher(AES(key), GCM(counter), backend=bend).encryptor()
-        data = cipher.update(pt)
-        cipher.finalize()
-        return data, cipher.tag
+        return nacl.secret.SecretBox(key).encrypt(pt, counter)[self.cipher_nonce_size:]
 
-    def decrypt_aes_initial_keyx(self, ct, ack=False):
-        counter = ct[:self.cipher_block_size]
-        tag = ct[self.cipher_block_size:self.cipher_block_size*2]
-        ct = ct[self.cipher_block_size*2:]
+    def decrypt(self, ct, key, counter):
+        try:
+            return nacl.secret.SecretBox(key).decrypt(ct, counter)
+        except:
+            return None
+
+    def decrypt_initial_keyx(self, ct, ack=False):
+        counter = ct[:self.cipher_nonce_size]
+        ct = ct[self.cipher_nonce_size:]
         key = self.derive_keys()
 
         self.print_key('Decrypting initial key exchange.', key)
@@ -132,45 +129,22 @@ class Chats(object):
         else:
             msg_key = key['message_key']
 
-        cipher = Cipher(AES(msg_key), GCM(counter, tag),
-            backend=bend).decryptor()
+        pt = self.decrypt(ct, msg_key, counter)
+        if pt:
+            return pt[:32], pt[32:64]
 
-        try:
-            pt = cipher.update(ct)
-            cipher.finalize()
-        except InvalidTag:
-            return None, None
-
-        return pt[:32], pt[32:64]
-
-    def decrypt_aes_keyx(self, ct, tag, decryptor):
+    def decrypt_keyx(self, ct, decryptor):
         decryptor = self.derive_keys(decryptor)
 
-        key = decryptor['exchange_key']
-        counter = decryptor['exchange_counter']
+        pt = self.decrypt(ct, decryptor['exchange_key'], decryptor['exchange_counter'])
+        if pt:
+            return pt[:32]
 
-        cipher = Cipher(AES(key), GCM(counter, tag), backend=bend).decryptor()
-
-        try:
-            pt = cipher.update(ct)
-            cipher.finalize()
-        except InvalidTag:
-            return None
-
-        return pt[:32]
-
-    def decrypt_aes_msg(self, ct, tag, decryptor):
+    def decrypt_message(self, ct, decryptor):
         decryptor = self.derive_keys(decryptor)
 
-        key = decryptor['message_key']
-        counter = decryptor['message_counter']
-
-        cipher = Cipher(AES(key), GCM(counter, tag), backend=bend).decryptor()
-
-        try:
-            pt = cipher.update(ct)
-            cipher.finalize()
-        except InvalidTag:
+        pt = self.decrypt(ct, decryptor['message_key'], decryptor['message_counter'])
+        if not pt:
             return None
 
         bob_ephemeral, msg = pt[:32], pt[32:]
@@ -232,9 +206,9 @@ class Chats(object):
 
         hmac_key = self.proto_id + ':mac'
         master = self.hmac(master + str(key['counter']), hmac_key, algorithm=SHA512)
-        master = self.derive_key(master, 192)
+        master = self.derive_key(master, 176)
         
-        keys = list(struct.unpack('>32s32s32s32s32s32s', master))
+        keys = list(struct.unpack('>32s32s32s32s24s24s', master))
         key['exchange_counter'] = keys.pop()
         key['message_counter'] = keys.pop()
         key['exchange_chaff_key'] = keys.pop()
@@ -254,7 +228,7 @@ class Chats(object):
             del self.send['counter']
 
     def got_key(self, bob_ephemeral):
-        if not bob_ephemeral:
+        if not bob_ephemeral or 'bob' not in self.send:
             return
 
         if self.send_pending and bob_ephemeral != self.send['bob'].serialize():
@@ -280,10 +254,10 @@ class Chats(object):
         if not self.established():
             return
 
-        ct, tag = self.encrypt_aes(self.send['message_key'],
-            self.send['message_counter'], pt)
+        ct = self.encrypt(pt, self.send['message_key'],
+            self.send['message_counter'])
 
-        blocks = self.mac_blocks(tag + ct, self.send['chaff_key'])
+        blocks = self.mac_blocks(ct, self.send['chaff_key'])
         return self.chaff(blocks)
 
     def encrypt_keyx(self):
@@ -293,17 +267,17 @@ class Chats(object):
         self.receive_pending['acked'] = True
 
         data = self.get_public(self.receive_pending['alice'])
-        ct, tag = self.encrypt_aes(self.send['exchange_key'],
-            self.send['exchange_counter'], data)
+        ct = self.encrypt(data, self.send['exchange_key'],
+            self.send['exchange_counter'])
 
-        blocks = self.mac_blocks(tag + ct, self.send['exchange_chaff_key'])
+        blocks = self.mac_blocks(ct, self.send['exchange_chaff_key'])
         return self.chaff(blocks)
 
     def encrypt_initial_keyx(self):
         self.i_am_alice = not self.established()
         self.initialized = True
 
-        counter = urandom(self.cipher_block_size)
+        counter = urandom(self.cipher_nonce_size)
         key = self.derive_keys()
         self.print_key('Encrypting initial key exchange.', key)
 
@@ -318,9 +292,9 @@ class Chats(object):
             msg_key = key['exchange_key']
             chaff_key = key['exchange_chaff_key']
 
-        ct, tag = self.encrypt_aes(msg_key, counter, ephem_keys)
+        ct = self.encrypt(ephem_keys, msg_key, counter)
 
-        blocks = self.mac_blocks(counter + tag + ct, chaff_key)
+        blocks = self.mac_blocks(counter + ct, chaff_key)
         return self.chaff(blocks)
 
     def try_dechaffing(self, ct):
@@ -371,7 +345,7 @@ class Chats(object):
                 ct = exchange_ct
                 ack = True
 
-            bob_ephem1, bob_ephem2 = self.decrypt_aes_initial_keyx(ct, ack=ack)
+            bob_ephem1, bob_ephem2 = self.decrypt_initial_keyx(ct, ack=ack)
             if not bob_ephem1:
                 print ':('
                 return None
@@ -396,7 +370,7 @@ class Chats(object):
         elif ct:
             self.receive = key
             self.print_key('Decrypting message.', self.receive)
-            msg = self.decrypt_aes_msg(ct[16:], ct[:16], self.receive)
+            msg = self.decrypt_message(ct, self.receive)
 
             if self.receive_pending and not self.receive_pending['acked']:
                 return { 'msg': msg, 'keyx': self.encrypt_keyx() }
@@ -404,7 +378,7 @@ class Chats(object):
                 return { 'msg': msg }
         else:
             self.print_key('Decrypting keyx.', key)
-            bob_ephemeral = self.decrypt_aes_keyx(exchange_ct[16:48], exchange_ct[:16], key)
+            bob_ephemeral = self.decrypt_keyx(exchange_ct, key)
             self.got_key(bob_ephemeral)
             return None
 

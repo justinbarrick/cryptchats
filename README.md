@@ -16,6 +16,7 @@ It was designed for high security and obfuscation of ciphertexts and metadata.
     * irssi-python
     * python-cryptography
     * curve25519-donna
+    * pynacl
 
 cryptography and curve25519-donna can be installed from pip or your
 distribution's repositories. If your distribution does not have an
@@ -29,11 +30,14 @@ Install the dependencies and setup cryptchats:
     $ sudo apt-get install python-dev build-essential
     $ sudo apt-get build-dep irssi
     $ ./install-irssi-python.sh
-    $ sudo pip install cryptography curve25519-donna
+    $ virtualenv ~/.cryptchats
+    $ source ~/.cryptchats/bin/activate
+    $ pip install -r requirements.txt
     $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/
     $ ln -s ~/src/cryptchats/cryptchats.py ~/.irssi/scripts/
     $ ln -s ~/src/cryptchats/cryptchats-irssi.py ~/.irssi/scripts/autorun/
     $ echo load python >> .irssi/startup
+    $ echo "alias irssi='source ~/.cryptchats/bin/activate && irssi'" >> ~/.bashrc
 
 # Commands
 
@@ -45,7 +49,7 @@ Currently in beta, please report any bugs.
 
 # Protocol description
 
-* aes256, gcm mode
+* salsa20 with Pol1305
 * curve25519
 * hmac-sha512 (hmac-sha256 for chaffing)
 * hkdf with proto_id 'cryptchats-protocol-v1'
@@ -90,10 +94,10 @@ ephemeral key's shared key:
 Once the key seed is generated, the key seed is concatenated with the message counter (a
 tally of all messages encrypted with this key, starting with zero) as literal string digits
 (e.g. '0') and then HMACed with the hmac key of 'cryptchats-protocol-v1:mac'. This value is
-then passed through the HKDF to generate the 192-byte master key.
+then passed through the HKDF to generate the 176-byte master key.
 
     hmac_key = proto_id | ':mac'
-    master = HKDF(HMAC(key_seed | str(counter), hmac_key), 192)
+    master = HKDF(HMAC(key_seed | str(counter), hmac_key), 176)
 
 From this master key we derive a series of 256-bit keys:
 
@@ -110,9 +114,9 @@ a shared key with Bob using the method above (we discard the generated message
 counter and use a random one because this key will never change). She then
 encrypts her ephemeral keys with the `message_key` and sends these to Bob:
 
-    random_counter = random(16)
+    random_counter = random(24)
     message = alice_ephemeral_receiving | alice_ephemeral_sending
-    ct, tag = AES(message, message_key, random_counter)
+    ct, tag = Salsa20(message, message_key, random_counter)
     ct = random_counter | tag | ct
 
 For chaffing, Alice will use the generated `chaff_key`. Bob does the same thing
@@ -120,9 +124,9 @@ when responding, except the message is reversed and instead of using the `messag
 and `chaff_key`, he uses the `exchange_key` and `exchange_chaff_key`. This allows
 the client to distinguish between fresh key exchanges and acknowledgements.
 
-    random_counter = random(16)
+    random_counter = random(24)
     message = bob_ephemeral_sending | bob_ephemeral_receiving
-    ct, tag = AES(message, exchange_key, random_counter)
+    ct, tag = Salsa20(message, exchange_key, random_counter)
     ct = random_counter | tag | ct
 
 ### Encrypting messages
@@ -132,7 +136,7 @@ any messages using the current ephemeral key, she generates a new ephemeral key.
 has, then Alice will resend the previously generated ephemeral key.
 
     message = alice_ephemeral | message
-    ct, tag = AES(message, message_key, message_counter)
+    ct, tag = Salsa20(message, message_key, message_counter)
     ct = tag | ct
 
 For chaffing, Alice will use the generated `chaff_key`. After sending the message,
@@ -146,7 +150,7 @@ acknowledgements do not result in further key exchanges). She generates a new ep
 key and encrypts it with the exchange keys.
 
     message = alice_receive_ephemeral
-    ct, tag = AES(message, exchange_key, exchange_counter)
+    ct, tag = Salsa20(message, exchange_key, exchange_counter)
     ct = tag | ct
 
 For chaffing, Alice will use the generated `exchange_chaff_key` and she increments the
