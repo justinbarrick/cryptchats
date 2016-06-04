@@ -1,18 +1,19 @@
 #!/bin/bash
-mkdir irssi-python
-cd irssi-python
-curl -L http://irssi.org/files/irssi-0.8.17.tar.gz |tar xz
-curl -L https://github.com/downloads/danielrichman/irssi_rstatus/irssi-python-ac.tar.gz |tar xz
-curl -O http://anti.teamidiot.de/static/nei/*/Code/Irssi/python-256color.diff
 
+# download irssi python
+git clone https://github.com/irssi-import/irssi-python
+cd irssi-python
+
+# download latest irssi source to compile against
+curl -L https://github.com/irssi/irssi/releases/download/0.8.19/irssi-0.8.19.tar.gz |tar xz
+
+# build irssi-python against latest irssi source
 export PYTHON_VERSION=2
-
-cd irssi-python
-mv ../python-256color.diff ./src/
-patch -p1 < src/python-256color.diff
-
-./configure --with-irssi=../irssi-0.8.17 --prefix=/usr
+autoreconf -ivf -I.
+./configure --with-irssi=irssi-0.8.19 --prefix=/usr
 make -C src constants
 make
+libtool --finish /usr/lib/irssi/modules
 
+# install irssi-python globally
 sudo make install
